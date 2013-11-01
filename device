@@ -1,0 +1,139 @@
+// Firmware reading 6xLM335 temperature sensors
+// Only report readings for connected sensors
+//  - sensors reading temps above -100C has sensor connected
+//
+// Version history
+// 1.0 Initial release
+//  - single sample reported
+// 1.1 debugging added
+// 1.2 polling multiple readings, interval 1s
+// 1.3 debug as config parameter
+
+// Output ports to send temperature readings
+local t0 = OutputPort("Temp0", "number");
+local t1 = OutputPort("Temp1", "number");
+local t2 = OutputPort("Temp2", "number");
+local t3 = OutputPort("Temp3", "number");
+local t4 = OutputPort("Temp4", "number");
+local t5 = OutputPort("Temp5", "number");
+local wifi = OutputPort("WiFi","number");
+local vref = OutputPort("Vref","number");
+local debug_out = OutputPort("Debug","number");
+
+// Poll accumulators
+local tacc=[0.0,0.0,0.0,0.0,0.0,0.0];
+local samples=0;
+local poll_period=1.0;
+local report_period=55.0;
+
+
+// Inputs
+local input = InputPort("x","number");
+const ARES=65535.0;
+
+
+function LM335(reading)
+{
+    local vref=3.251; // Value trimmed to get correct reading
+    // vref=hardware.voltage();
+    return(((reading/ARES*vref/0.01)-273.15));
+}
+
+// Present Sensors
+function present()
+{
+    server.log("Sensors found connected:");
+    if(LM335(hardware.pin1.read())>-100) server.log("-  Temp0");
+    if(LM335(hardware.pin2.read())>-100) server.log("-  Temp1");
+    if(LM335(hardware.pin5.read())>-100) server.log("-  Temp2");
+    if(LM335(hardware.pin7.read())>-100) server.log("-  Temp3");
+    if(LM335(hardware.pin8.read())>-100) server.log("-  Temp4");
+    if(LM335(hardware.pin9.read())>-100) server.log("-  Temp5");
+}
+
+// Poll all temp sensors and accumulate
+function capture()
+{
+  imp.wakeup(poll_period,capture);
+  tacc[0]+=LM335(hardware.pin1.read());
+  tacc[1]+=LM335(hardware.pin2.read());
+  tacc[2]+=LM335(hardware.pin5.read());
+  tacc[3]+=LM335(hardware.pin7.read());
+  tacc[4]+=LM335(hardware.pin8.read());
+  tacc[5]+=LM335(hardware.pin9.read());
+  samples++;
+}
+
+// Reset accumulators and counters
+function capture_reset()
+{
+    tacc[0]=0;
+    tacc[1]=0;
+    tacc[2]=0;
+    tacc[3]=0;
+    tacc[4]=0;
+    tacc[5]=0;
+    samples=0;
+}
+
+// Report temperature readings
+function report()
+{
+    if(imp.configparams.debug>2)server.log("Report");
+    // Set timer for the next capture
+    imp.wakeup(report_period, report);
+ 
+    // Output the temperature
+    local temp = tacc[0]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t0.set(temp);
+    }
+    temp = tacc[1]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t1.set(temp);
+    }
+    temp = tacc[2]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t2.set(temp);
+    }
+    temp = tacc[3]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t3.set(temp);
+    }
+    temp = tacc[4]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t4.set(temp);
+    }
+    temp = tacc[5]/samples;
+    if(temp>-100||imp.configparams.debug>4){
+      t5.set(temp);
+    }
+    // debug cosm logging
+    if(imp.configparams.debug>0)
+    {
+        debug_out.set(imp.configparams.debug);
+        wifi.set(imp.rssi());
+        vref.set(hardware.voltage());
+    }
+    capture_reset();
+}
+
+// Setup
+imp.configure("Cosm/Xively LM335x6 v1.3", [input], [t0,t1,t2,t3,t4,t5,wifi,vref,debug_out],{debug=1});
+// Prepare for analog read
+hardware.pin1.configure(ANALOG_IN);
+hardware.pin2.configure(ANALOG_IN);
+hardware.pin5.configure(ANALOG_IN);
+hardware.pin7.configure(ANALOG_IN);
+hardware.pin8.configure(ANALOG_IN);
+hardware.pin9.configure(ANALOG_IN);
+
+// debug_out.set(0);
+server.log("Connected to " + imp.getbssid());
+server.log(format("Imp MAC address: %s",imp.getmacaddress()));
+server.log(format("WIFI signal level: %d dBm", imp.rssi()));
+server.log(format("Vref %2.2fV",hardware.voltage()));
+present();
+imp.wakeup(poll_period,capture);
+imp.wakeup(30,report);
+server.log(format("Running, debug level %d", imp.configparams.debug));
